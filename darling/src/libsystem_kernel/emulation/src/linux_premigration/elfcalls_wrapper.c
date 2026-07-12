@@ -4,6 +4,7 @@
 #include <dlfcn.h>
 
 #include <darling/emulation/common/simple.h>
+#include <darling/emulation/xnu_syscall/bsd/impl/process/fork.h>
 
 extern struct elf_calls* _elfcalls;
 
@@ -46,6 +47,7 @@ int native_fork(void)
 __attribute__((visibility("default")))
 void __darling_arm64_thread_bridge_postfork_complete(void)
 {
+	sys_fork_postfork_child();
 	elfcalls()->arm64_thread_bridge_postfork_complete();
 }
 
