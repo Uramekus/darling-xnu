@@ -544,7 +544,7 @@ find_nl:
 		}
 
 		rd = sys_read(fd, buf->buf + buf->used, sizeof(buf->buf) - buf->used);
-		if (rd == 0)
+		if (rd <= 0)
 		{
 			if (!buf->used)
 				return NULL;
