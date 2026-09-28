@@ -6,12 +6,16 @@ enable_language(ASM)
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -std=gnu99 -fvisibility=hidden -fPIC -fno-builtin -ggdb -Wno-int-conversion -Wno-compare-distinct-pointer-types")
 set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -nostdlib")
 
+# This controls only kern.osproductversion, not the parent SystemVersion.plist.
+set(DARLING_EMULATED_OS_PRODUCT_VERSION "26.0" CACHE STRING
+	"Product version returned by kern.osproductversion (requires rebuilding libsystem_kernel)")
+
 add_definitions(-DBSDTHREAD_WRAP_LINUX_PTHREAD
 	-DEMULATED_SYSNAME="Darwin"
 	-DEMULATED_RELEASE="25.0.0"
 	-DEMULATED_VERSION="Darwin Kernel Version 25.0.0"
 	-DEMULATED_OSVERSION="20G1120"
-	-DEMULATED_OSPRODUCTVERSION="26.0"
+	-DEMULATED_OSPRODUCTVERSION="${DARLING_EMULATED_OS_PRODUCT_VERSION}"
 )
 
 # include src/startup for rtsig.h
@@ -383,4 +387,3 @@ add_dependencies(emulation_dyld rtsig_h generate_dserver_rpc_wrappers)
 
 make_fat(emulation)
 make_fat(emulation_dyld)
-
