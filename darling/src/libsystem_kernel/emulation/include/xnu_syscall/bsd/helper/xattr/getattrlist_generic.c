@@ -31,7 +31,9 @@
 #define ATTR_DIR_ENTRYCOUNT 0x00000002
 
 #define XATTR_FINDER_INFO "com.apple.FinderInfo"
-#define XATTR_RESOURCE_FORK "com.apple.ResourceFork"
+// Darwin xattr names without a Linux namespace are stored under user.
+// Keep this in sync with xattr_name_to_linux used by getxattr/setxattr.
+#define XATTR_RESOURCE_FORK "user.com.apple.ResourceFork"
 
 #define FSOPT_NOFOLLOW 1
 #define FSOPT_REPORT_FULLSIZE 4
@@ -182,20 +184,6 @@ struct xnu_attrlist* alist, void *attributeBuffer, __SIZE_TYPE__ bufferSize, uns
 			memset(next, 0, 32);
 		next += 32;
 	}
-	if (alist->fileattr & ATTR_FILE_RSRCLENGTH)
-	{
-#if HAS_PATH
-		rv = LINUX_SYSCALL(__NR_getxattr, vc.path, XATTR_FINDER_INFO, NULL, 0);
-#else
-		rv = LINUX_SYSCALL(__NR_fgetxattr, fd, XATTR_FINDER_INFO, NULL, 0);
-#endif
-		if (rv < 0)
-			*((uint32_t*) next) = 0;
-		else
-			*((uint32_t*) next) = rv;
-		next += 4;
-	}
-
 	if (alist->dirattr & ATTR_DIR_ENTRYCOUNT) {
 		char buf[1024]; // maybe this should be smaller?
 		int tmp_fd;
@@ -236,6 +224,23 @@ attr_dir_entrycount_out:
 		close_internal(tmp_fd);
 attr_dir_entrycount_out_no_fd:
 		next += 4;
+	}
+
+	if (alist->fileattr & ATTR_FILE_RSRCLENGTH)
+	{
+#if HAS_PATH
+		if (options & FSOPT_NOFOLLOW)
+			rv = LINUX_SYSCALL(__NR_lgetxattr, vc.path, XATTR_RESOURCE_FORK, NULL, 0);
+		else
+			rv = LINUX_SYSCALL(__NR_getxattr, vc.path, XATTR_RESOURCE_FORK, NULL, 0);
+#else
+		rv = LINUX_SYSCALL(__NR_fgetxattr, fd, XATTR_RESOURCE_FORK, NULL, 0);
+#endif
+		// File attributes follow directory attributes. Darwin's off_t is
+		// eight bytes, but attribute fields may only be four-byte aligned.
+		int64_t resourceLength = rv < 0 ? 0 : rv;
+		memcpy(next, &resourceLength, sizeof(resourceLength));
+		next += sizeof(resourceLength);
 	}
 
 	*((uint32_t*) ourBuffer) = spaceNeeded;
