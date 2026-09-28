@@ -22,6 +22,14 @@ program=<<~C
     assert(strstr(buffer,"LR=0xffffffffffffffff "));
     assert(strstr(buffer,"x19=0xffffffffffffffff "));
     assert(strstr(buffer,"x22=0xffffffffffffffff\\n"));
+    /* Distinct values catch swapped or duplicated register indices. */
+    for(int i=0;i<31;++i) context.uc_mcontext.gregs.regs[i]=0x100+i;
+    #{call}
+    assert(strcmp(buffer,"sigexc: ARM64 registers LR=0x11e FP=0x11d x0=0x100 x1=0x101 x2=0x102 x3=0x103 x8=0x108 x19=0x113 x20=0x114 x21=0x115 x22=0x116\\n")==0);
+    /* All fields at full width, including FP. */
+    for(int i=0;i<31;++i) context.uc_mcontext.gregs.regs[i]=UINT64_MAX;
+    length=#{call}
+    assert(length>0 && (size_t)length<sizeof buffer);
     puts("PASS: saved registers formatted without frame dereference; fits 512-byte logger");
   }
 C
