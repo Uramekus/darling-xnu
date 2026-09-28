@@ -49,7 +49,11 @@ program = <<~C
     for (unsigned flag=1;flag<=8;++flag) {
       if (flag==4) continue;
       install.ss_flags=flag;
-      assert(sys_sigaltstack(&install,NULL)==-EINVAL);
+      state.ss_sp=(void*)0x1230; state.ss_size=42; state.ss_flags=99;
+      assert(sys_sigaltstack(&install,&state)==-EINVAL);
+      assert(state.ss_sp==(void*)0x1230 && state.ss_size==42 && state.ss_flags==99);
+      assert(sys_sigaltstack(NULL,&state)==0 && state.ss_flags==0);
+      assert(state.ss_sp==memory && state.ss_size==128*1024);
     }
     struct bsd_stack disable={NULL,0,4};
     assert(sys_sigaltstack(&disable,&state)==0 && state.ss_flags==0);
