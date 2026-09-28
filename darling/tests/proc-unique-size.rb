@@ -31,6 +31,7 @@ program=<<~C
     memset(&info,0xa5,sizeof info);
   #ifndef VARIANT_DYLD
     assert(_proc_pidonfo_uniqinfo(3,&info,sizeof info-1)==-ENOSPC && reads==0);
+    for (size_t i=0;i<sizeof info;++i) assert(((unsigned char *)&info)[i]==0xa5);
     assert(_proc_pidonfo_uniqinfo(3,&info,sizeof info)==sizeof info);
     assert(info.p_uniqueid==((10ULL<<16)|3) && info.p_puniqueid==((20ULL<<16)|2));
     reads=element=0;fail_read=1;
@@ -39,7 +40,8 @@ program=<<~C
     assert(_proc_pidonfo_uniqinfo(3,&info,sizeof info)==-ESRCH);
   #else
     assert(_proc_pidonfo_uniqinfo(3,&info,sizeof info)==-ENOTSUP);
-    assert(((unsigned char *)&info)[0]==0xa5 && reads==0);
+    for (size_t i=0;i<sizeof info;++i) assert(((unsigned char *)&info)[i]==0xa5);
+    assert(reads==0);
   #endif
     puts("PASS: result-size/error contract");
   }
