@@ -4,9 +4,14 @@
 #include <dlfcn.h>
 
 #include <darling/emulation/common/simple.h>
+#include <darling/emulation/conversion/duct_errno.h>
 #include <darling/emulation/xnu_syscall/bsd/impl/process/fork.h>
 
 extern struct elf_calls* _elfcalls;
+extern size_t _elfcalls_size;
+
+#define ELFCALLS_HAS_FIELD(field) (_elfcalls && \
+	_elfcalls_size >= offsetof(struct elf_calls, field) + sizeof(_elfcalls->field))
 
 struct elf_calls* elfcalls(void)
 {
@@ -41,15 +46,21 @@ long native_sysconf(int name)
 
 int native_fork(void)
 {
-	return elfcalls()->native_fork();
+	if (!ELFCALLS_HAS_FIELD(native_fork) || !_elfcalls->native_fork)
+		return -LINUX_ENOSYS;
+	return _elfcalls->native_fork();
 }
 
+#if defined(__arm64__) || defined(__aarch64__)
 __attribute__((visibility("default")))
 void __darling_arm64_thread_bridge_postfork_complete(void)
 {
 	sys_fork_postfork_child();
-	elfcalls()->arm64_thread_bridge_postfork_complete();
+	if (ELFCALLS_HAS_FIELD(arm64_thread_bridge_postfork_complete) &&
+		_elfcalls->arm64_thread_bridge_postfork_complete)
+		_elfcalls->arm64_thread_bridge_postfork_complete();
 }
+#endif
 
 void* __darling_thread_create(unsigned long stack_size, unsigned long pthobj_size,
 			void* entry_point, uintptr_t arg3,
