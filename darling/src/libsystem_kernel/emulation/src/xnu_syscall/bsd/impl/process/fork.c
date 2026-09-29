@@ -21,9 +21,15 @@ extern _libkernel_functions_t _libkernel_functions;
 #if defined(__arm64__) || defined(__aarch64__)
 static int postfork_child_wdfd = -1;
 static int postfork_child_lifetime_read_fd = -1;
+static bool postfork_child_pending = false;
 
 void sys_fork_postfork_child(void)
 {
+	if (!postfork_child_pending)
+		return;
+	// Consume before calling out: repeated/reentrant completion must not check
+	// in twice or close a descriptor that has since been reused.
+	postfork_child_pending = false;
 	guard_entry_options_t options;
 	options.close = __dserver_close_socket;
 	guard_table_add(__dserver_per_thread_socket(), guard_flag_prevent_close | guard_flag_close_on_fork, &options);
@@ -80,6 +86,7 @@ long sys_fork(void)
 		// callback. Defer work that can allocate until libSystem unlocks malloc.
 		postfork_child_wdfd = wdfd;
 		postfork_child_lifetime_read_fd = newReadFd;
+		postfork_child_pending = true;
 #else
 		// guard it
 		guard_entry_options_t options;
