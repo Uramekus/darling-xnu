@@ -30,7 +30,7 @@
 #define ATTR_CMN_OBJTAG 0x00000010
 #define ATTR_DIR_ENTRYCOUNT 0x00000002
 
-#define XATTR_FINDER_INFO "com.apple.FinderInfo"
+#define XATTR_FINDER_INFO "user.com.apple.FinderInfo"
 // Darwin xattr names without a Linux namespace are stored under user.
 // Keep this in sync with xattr_name_to_linux used by getxattr/setxattr.
 #define XATTR_RESOURCE_FORK "user.com.apple.ResourceFork"
@@ -176,7 +176,9 @@ struct xnu_attrlist* alist, void *attributeBuffer, __SIZE_TYPE__ bufferSize, uns
 	if (alist->commonattr & ATTR_CMN_FNDRINFO)
 	{
 #if HAS_PATH
-		rv = LINUX_SYSCALL(__NR_getxattr, vc.path, XATTR_FINDER_INFO, next, 32);
+		rv = (options & FSOPT_NOFOLLOW) ?
+			LINUX_SYSCALL(__NR_lgetxattr, vc.path, XATTR_FINDER_INFO, next, 32) :
+			LINUX_SYSCALL(__NR_getxattr, vc.path, XATTR_FINDER_INFO, next, 32);
 #else
 		rv = LINUX_SYSCALL(__NR_fgetxattr, fd, XATTR_FINDER_INFO, next, 32);
 #endif

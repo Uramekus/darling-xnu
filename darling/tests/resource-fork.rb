@@ -51,8 +51,16 @@ program=<<~C
     int fd=open(path,O_CREAT|O_RDWR,0600); assert(fd>=0);
     const char payload[]="resource payload";
     char finder[32]={0};
+    for(unsigned i=0;i<sizeof finder;++i) finder[i]=(char)(i+1);
     assert(fsetxattr(fd,"user.com.apple.ResourceFork",payload,sizeof payload,0)==0);
     assert(fsetxattr(fd,"user.com.apple.FinderInfo",finder,sizeof finder,0)==0);
+    {
+      struct xnu_attrlist info={.bitmapcount=5,.commonattr=0x4000};
+      unsigned char result[40]; memset(result,0xa5,sizeof result);
+      assert(get(fd,path,&info,result,sizeof result,0)==0);
+      uint32_t size; memcpy(&size,result,4);
+      assert(size==36 && memcmp(result+4,finder,32)==0 && result[36]==0xa5);
+    }
     struct xnu_attrlist attrs={.bitmapcount=5,.fileattr=0x1000};
     unsigned char out[64]; int64_t length; uint32_t total;
     memset(out,0xa5,sizeof out);
@@ -76,6 +84,14 @@ program=<<~C
     memcpy(&length,out+20,8); assert(length==sizeof payload);
     char linkpath[4096]; snprintf(linkpath,sizeof linkpath,"%s.link",path);
     assert(symlink(path,linkpath)==0);
+    {
+      struct xnu_attrlist info={.bitmapcount=5,.commonattr=0x4000};
+      unsigned char result[40];
+      assert(get(fd,linkpath,&info,result,sizeof result,0)==0);
+      assert(memcmp(result+4,finder,32)==0);
+      assert(get(fd,linkpath,&info,result,sizeof result,1)==0);
+      for(unsigned i=4;i<36;++i) assert(result[i]==0);
+    }
     attrs.commonattr=0;
     assert(get(fd,linkpath,&attrs,out,sizeof out,0)==0);
     memcpy(&length,out+4,8); assert(length==sizeof payload);
@@ -84,6 +100,14 @@ program=<<~C
     unlink(linkpath);
   #endif
     assert(fremovexattr(fd,"user.com.apple.ResourceFork")==0);
+    assert(fremovexattr(fd,"user.com.apple.FinderInfo")==0);
+    {
+      struct xnu_attrlist info={.bitmapcount=5,.commonattr=0x4000};
+      unsigned char result[40]; memset(result,0xa5,sizeof result);
+      assert(get(fd,path,&info,result,sizeof result,0)==0);
+      for(unsigned i=4;i<36;++i) assert(result[i]==0);
+      assert(result[36]==0xa5);
+    }
     attrs.commonattr=0;
     assert(get(fd,path,&attrs,out,sizeof out,0)==0);
     memcpy(&length,out+4,8); assert(length==0);
