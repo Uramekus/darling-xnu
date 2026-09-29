@@ -64,7 +64,8 @@ static void thread_state_to_mcontext(const x86_thread_state32_t* s, struct linux
 static void float_state_to_mcontext(const x86_float_state32_t* s, linux_fpregset_t fx);
 #elif defined(__aarch64__) || defined(__arm64__)
 #include <mach/arm/thread_status.h>
-typedef struct { unsigned int fpsr; unsigned int fpcr; __uint128_t vregs[32]; } arm_neon_state64_t_linux;
+/* RPC exchanges Darwin arm_neon_state64_t, not Linux's FPSIMD record layout. */
+typedef struct { __uint128_t vregs[32]; unsigned int fpsr; unsigned int fpcr; } arm_neon_state64_t_linux;
 static void mcontext_to_thread_state(const struct linux_gregset* regs, arm_thread_state64_t* s);
 static void mcontext_to_float_state(const unsigned char* reserved, arm_neon_state64_t_linux* s);
 static void thread_state_to_mcontext(const arm_thread_state64_t* s, struct linux_gregset* regs);
@@ -360,11 +361,27 @@ void sigexc_handler(int linux_signum, struct linux_siginfo* info, struct linux_u
 	kern_printf("sigexc: have RIP 0x%llx\n", ctxt->uc_mcontext.gregs.rip);
 #elif defined(__aarch64__) || defined(__arm64__)
 	if (linux_signum == LINUX_SIGSEGV || linux_signum == LINUX_SIGBUS || linux_signum == LINUX_SIGILL)
+	{
 		kern_printf("sigexc: fatal signal %d in PID %d at PC 0x%llx, fault_addr 0x%llx, SP 0x%llx\n",
 			linux_signum, getpid(),
 			(unsigned long long)ctxt->uc_mcontext.gregs.pc,
 			(unsigned long long)ctxt->uc_mcontext.gregs.fault_address,
 			(unsigned long long)ctxt->uc_mcontext.gregs.sp);
+		// Only inspect the saved context. The interrupted FP/SP may point
+		// to unmapped memory, so walking frames here could fault again.
+		kern_printf("sigexc: ARM64 registers LR=0x%llx FP=0x%llx x0=0x%llx x1=0x%llx x2=0x%llx x3=0x%llx x8=0x%llx x19=0x%llx x20=0x%llx x21=0x%llx x22=0x%llx\n",
+			(unsigned long long)ctxt->uc_mcontext.gregs.regs[30],
+			(unsigned long long)ctxt->uc_mcontext.gregs.regs[29],
+			(unsigned long long)ctxt->uc_mcontext.gregs.regs[0],
+			(unsigned long long)ctxt->uc_mcontext.gregs.regs[1],
+			(unsigned long long)ctxt->uc_mcontext.gregs.regs[2],
+			(unsigned long long)ctxt->uc_mcontext.gregs.regs[3],
+			(unsigned long long)ctxt->uc_mcontext.gregs.regs[8],
+			(unsigned long long)ctxt->uc_mcontext.gregs.regs[19],
+			(unsigned long long)ctxt->uc_mcontext.gregs.regs[20],
+			(unsigned long long)ctxt->uc_mcontext.gregs.regs[21],
+			(unsigned long long)ctxt->uc_mcontext.gregs.regs[22]);
+	}
 #endif
 
 	thread_t thread = mach_thread_self();
@@ -680,6 +697,7 @@ void mcontext_to_thread_state(const struct linux_gregset* regs, arm_thread_state
 	s->__sp = regs->sp;
 	s->__pc = regs->pc;
 	s->__cpsr = (uint32_t)regs->pstate;
+	s->__pad = 0;
 }
 
 void thread_state_to_mcontext(const arm_thread_state64_t* s, struct linux_gregset* regs)
