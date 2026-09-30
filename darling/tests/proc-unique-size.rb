@@ -13,7 +13,7 @@ program=<<~C
   #include <assert.h>
   #{record}
   static char fakeuuid[16];
-  static int reads,fail_read,element;
+  static int reads,fail_read,element,no_parent;
   #define __simple_sprintf sprintf
   #define __simple_atoi(text,end) strtoull(text,(char **)end,10)
   static int read_string(const char *path,char *out,size_t size) {
@@ -22,7 +22,7 @@ program=<<~C
   }
   static void skip_stat_elems(char **p,int n) {(void)p;(void)n;}
   static const char *next_stat_elem(char **p) {
-    (void)p; const char *values[]={"2","10","20"};
+    (void)p; const char *values[]={no_parent ? "0" : "2","10","20"};
     assert(element<3);return values[element++];
   }
   #{function}
@@ -36,6 +36,10 @@ program=<<~C
     assert(info.p_uniqueid==((10ULL<<16)|3) && info.p_puniqueid==((20ULL<<16)|2));
     reads=element=0;fail_read=1;
     assert(_proc_pidonfo_uniqinfo(3,&info,sizeof info)==-ESRCH);
+    reads=element=0;fail_read=2;no_parent=1;
+    assert(_proc_pidonfo_uniqinfo(3,&info,sizeof info)==sizeof info);
+    assert(reads==1 && info.p_puniqueid==0 && info.p_uniqueid==((10ULL<<16)|3));
+    no_parent=0;
     reads=element=0;fail_read=2;
     assert(_proc_pidonfo_uniqinfo(3,&info,sizeof info)==-ESRCH);
   #else
