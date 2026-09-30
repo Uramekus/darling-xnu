@@ -1,4 +1,5 @@
 #include <darling/emulation/other/mach/lkm.h>
+#include <darling/emulation/linux_premigration/elfcalls_size.h>
 
 #include <fcntl.h>
 #include <unistd.h>
@@ -28,6 +29,7 @@ extern _libkernel_functions_t _libkernel_functions;
 
 VISIBLE
 struct elf_calls* _elfcalls;
+size_t _elfcalls_size;
 
 static bool use_per_thread_driver_fd = false;
 
@@ -53,6 +55,7 @@ void mach_driver_init(const char** applep)
 			{
 				uintptr_t table = (uintptr_t) __simple_atoi16(applep[i] + 10, NULL);
 				_elfcalls = (struct elf_calls*) table;
+				_elfcalls_size = elfcalls_size_from_apple(applep);
 			}
 		}
 	}
@@ -63,6 +66,11 @@ void mach_driver_init(const char** applep)
 		_libkernel_functions->dyld_func_lookup("__dyld_get_elfcalls", (void**)&p2);
 		if (p2) {
 			_elfcalls = p2();
+			size_t (*get_size)(void) = NULL;
+			_elfcalls_size = 0;
+			_libkernel_functions->dyld_func_lookup("__dyld_get_elfcalls_size", (void**)&get_size);
+			if (_elfcalls && get_size)
+				_elfcalls_size = get_size();
 		}
 	}
 
@@ -151,6 +159,11 @@ VISIBLE
 void* elfcalls_get_pointer(void) {
 	return _elfcalls;
 };
+
+VISIBLE
+size_t elfcalls_get_size(void) {
+	return _elfcalls ? _elfcalls_size : 0;
+}
 
 VISIBLE
 uint64_t mach_absolute_time(void)
