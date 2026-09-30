@@ -105,7 +105,7 @@ const struct known_sysctl sysctls_machdep_cpu[] = {
     { .oid = _CPU_FAMILY, .type = CTLTYPE_INT, .exttype = "I", .name = "family", .handler = handle_family },
 		{ .oid = _CPU_MODEL, .type = CTLTYPE_INT, .exttype = "I", .name = "model", .handler = handle_model },
 		{ .oid = _CPU_STEPPING, .type = CTLTYPE_INT, .exttype = "I", .name = "stepping", .handler = handle_stepping },
-		{ .oid = _CPU_BRAND_STRING, .type = CTLTYPE_STRING, .exttype = "S", .name = "vendor", .handler = handle_brand_string },
+		{ .oid = _CPU_BRAND_STRING, .type = CTLTYPE_STRING, .exttype = "S", .name = "brand_string", .handler = handle_brand_string },
 		{ .oid = _CPU_FEATURES, .type = CTLTYPE_STRING, .exttype = "S", .name = "features", .handler = handle_features },
 		{ .oid = _CPU_CORE_COUNT, .type = CTLTYPE_INT, .exttype = "I", .name = "core_count", .handler = handle_core_count },
 	{ .oid = -1 }
@@ -125,11 +125,11 @@ const struct known_sysctl sysctls_machdep[] = {
 
 #ifndef setup
 #define setup(value)\
-            unsigned int level = 0;     \
-            unsigned int eax = value;   \
-            unsigned int ebx;           \
-            unsigned int edx;           \
-            unsigned int ecx
+            unsigned int level = value; \
+            unsigned int eax = 0;       \
+            unsigned int ebx = 0;       \
+            unsigned int edx = 0;       \
+            unsigned int ecx = 0
 #endif
 
 
@@ -221,12 +221,10 @@ sysctl_handler(handle_brand_string)
 {
     setup(0x80000000);
 
-    __cpuid(level,eax,ebx, ecx, edx);
+    __cpuid(level, eax, ebx, ecx, edx);
 
     if (eax < 0x80000004) // the information is not implemented
         return 2;
-
-
 
     union
     {
@@ -234,18 +232,20 @@ sysctl_handler(handle_brand_string)
         char name[49];
     } v;
 
-		for (int i = 1; i < 4; i++)
-		{
-				eax = 0x80000000+i;
-				__cpuid(level, eax, ebx, ecx, edx);
-				v.brand[0x0+(i-1)*4] = eax;
-				v.brand[0x1+(i-1)*4] = ebx;
-				v.brand[0x2+(i-1)*4] = ecx;
-				v.brand[0x3+(i-1)*4] = edx;
-		}
+    for (int i = 2; i <= 4; i++)
+    {
+        __cpuid(0x80000000 + i, eax, ebx, ecx, edx);
+        v.brand[0x0 + (i - 2) * 4] = eax;
+        v.brand[0x1 + (i - 2) * 4] = ebx;
+        v.brand[0x2 + (i - 2) * 4] = ecx;
+        v.brand[0x3 + (i - 2) * 4] = edx;
+    }
 
     v.name[48] = 0;
-    copyout_string(v.name, (char*) old, oldlen);
+    char *name_ptr = v.name;
+    while (*name_ptr == ' ') name_ptr++;
+
+    copyout_string(name_ptr, (char*) old, oldlen);
 
     return 0;
 }
