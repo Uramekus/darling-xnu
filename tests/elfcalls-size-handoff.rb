@@ -25,9 +25,11 @@ Dir.mktmpdir('elfcalls-handoff-') do |dir|
         assert(_elfcalls==(mode==2 ? NULL : &token));
         assert(_elfcalls_size==(mode==0 ? 123 : 0));
       }
-      _elfcalls=&token; _elfcalls_size=456; handoff();
-      assert(_elfcalls==&token && _elfcalls_size==456);
-      puts("PASS: sized dyld, old dyld, null pointer and direct metadata preservation");
+      mode=0; _elfcalls=&token; _elfcalls_size=456; handoff();
+      assert(_elfcalls==&token && _elfcalls_size==123);
+      mode=1; handoff();
+      assert(_elfcalls==&token && _elfcalls_size==0);
+      puts("PASS: sized dyld, old dyld, null pointer and repeated handoff reset");
     }
   C
   File.write("#{dir}/probe.c",code)
