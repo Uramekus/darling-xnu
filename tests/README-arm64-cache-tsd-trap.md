@@ -28,3 +28,13 @@ ELF TLS, and other SIGILL delivery unchanged. Install the kernel-side support
 before using a dyld cache translator that emits these instructions, including
 the static kernel copy linked into dyld. Each translated read incurs signal
 delivery overhead; this change prioritizes correct thread isolation.
+
+The optional native-slot optimization reads `darling_tsd_slot_offset=<hex>`
+from the apple vector and publishes registered Darwin TSD at native TP plus
+that offset. It accepts aligned offsets 16..32760 (the veneer LDR range).
+Older loaders omit the metadata and retain the trap/table path. The loader
+must own this slot independently of legacy bridge callback state.
+`arm64-native-tsd-slot-guest.c` checks slot/table agreement on the main thread
+and four worker threads, along with traps, pthread keys and errno. Build as a
+Darling guest C program and run with the cooperating loader/kernel. The slot
+getter is resolved dynamically so the test can link against an older SDK.

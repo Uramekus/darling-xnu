@@ -45,6 +45,21 @@ void mach_driver_init(const char** applep)
 #endif
 	LINUX_SYSCALL(__NR_prctl, LINUX_PR_SET_PTRACER, LINUX_PR_SET_PTRACER_ANY, 0UL, 0UL, 0UL);
 
+#if defined(__aarch64__)
+	// Both the static dyld copy and the dynamic kernel copy publish TSD. The
+	// latter must initialize this offset too, including on new guest threads.
+	if (applep != NULL) {
+		for (int i = 0; applep[i] != NULL; ++i) {
+			if (strncmp(applep[i], "darling_tsd_slot_offset=", 24) == 0) {
+				const char* end = NULL;
+				unsigned long offset = __simple_atoi16(applep[i] + 24, &end);
+				if (end && *end == '\0' && end != applep[i] + 24)
+					sys_thread_set_native_tsd_slot_offset(offset);
+			}
+		}
+	}
+#endif
+
 #ifdef VARIANT_DYLD
 	if (applep != NULL)
 	{
