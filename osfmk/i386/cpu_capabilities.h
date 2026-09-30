@@ -129,7 +129,7 @@ _NumCPUs( void )
 #define _COMM_PAGE32_AREA_USED          ( 1 * 4096 )                            /* this is the amt actually allocated */
 #define _COMM_PAGE32_SIGS_OFFSET        0x8000                                      /* offset to routine signatures */
 
-#define _COMM_PAGE64_AREA_LENGTH        ( 1 * 4096 )                    /* reserved length of entire comm area (2MB) */
+#define _COMM_PAGE64_AREA_LENGTH        ( 32 * 4096 )                   /* reserved length of entire comm area (128KB) */
 #ifdef __ASSEMBLER__
 #define _COMM_PAGE64_BASE_ADDRESS       ( 0x00007fffffe00000 )   /* base address of allocated memory */
 #else /* __ASSEMBLER__ */

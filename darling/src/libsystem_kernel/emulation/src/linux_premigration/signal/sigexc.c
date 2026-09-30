@@ -358,6 +358,10 @@ void sigexc_handler(int linux_signum, struct linux_siginfo* info, struct linux_u
 	}
 
 #ifdef __x86_64__
+	if (__builtin_expect(getenv("DARLING_LOG_SIGNALS") != NULL, 0)) {
+		__simple_printf("sigexc: signal %d (bsd %d) in PID %d at RIP 0x%llx\n",
+			linux_signum, bsd_signum, getpid(), (unsigned long long)ctxt->uc_mcontext.gregs.rip);
+	}
 	kern_printf("sigexc: have RIP 0x%llx\n", ctxt->uc_mcontext.gregs.rip);
 #elif defined(__aarch64__) || defined(__arm64__)
 	if (linux_signum == LINUX_SIGSEGV || linux_signum == LINUX_SIGBUS || linux_signum == LINUX_SIGILL)
