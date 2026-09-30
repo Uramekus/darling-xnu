@@ -16,6 +16,10 @@ int native_dlclose(void* module);
 void native_exit(int ec);
 
 long native_sysconf(int name);
+int native_fork(void);
+#if defined(__arm64__) || defined(__aarch64__)
+void __darling_arm64_thread_bridge_postfork_complete(void);
+#endif
 
 // Native thread wrapping
 void* __darling_thread_create(unsigned long stack_size, unsigned long pthobj_size,

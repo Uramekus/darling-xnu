@@ -18,12 +18,50 @@
 
 extern _libkernel_functions_t _libkernel_functions;
 
+#if defined(__arm64__) || defined(__aarch64__)
+static int postfork_child_wdfd = -1;
+static int postfork_child_lifetime_read_fd = -1;
+static bool postfork_child_pending = false;
+
+void sys_fork_postfork_child(void)
+{
+	if (!postfork_child_pending)
+		return;
+	// Consume before calling out: repeated/reentrant completion must not check
+	// in twice or close a descriptor that has since been reused.
+	postfork_child_pending = false;
+	guard_entry_options_t options;
+	options.close = __dserver_close_socket;
+	guard_table_add(__dserver_per_thread_socket(), guard_flag_prevent_close | guard_flag_close_on_fork, &options);
+
+	if (postfork_child_lifetime_read_fd != -1)
+	{
+		options.close = __dserver_close_process_lifetime_pipe;
+		guard_table_add(__dserver_get_process_lifetime_pipe(), guard_flag_prevent_close | guard_flag_close_on_fork, &options);
+	}
+
+	int dummy_stack_variable;
+	if (dserver_rpc_checkin(true, &dummy_stack_variable, postfork_child_lifetime_read_fd) < 0) {
+		__simple_printf("Failed to checkin with darlingserver after fork\n");
+		__simple_abort();
+	}
+	if (postfork_child_wdfd >= 0)
+		sys_fchdir(postfork_child_wdfd);
+
+	__dserver_close_process_lifetime_pipe(postfork_child_lifetime_read_fd);
+	postfork_child_wdfd = -1;
+	postfork_child_lifetime_read_fd = -1;
+}
+#endif
+
 long sys_fork(void)
 {
 	int ret;
 	int wdfd = get_perthread_wd();
 
-#ifdef SYS_fork
+#if defined(__arm64__) || defined(__aarch64__)
+	ret = native_fork();
+#elif defined(SYS_fork)
 	ret = LINUX_SYSCALL(__NR_fork);
 #else
 	ret = LINUX_SYSCALL(__NR_clone, LINUX_SIGCHLD, 0);
@@ -43,6 +81,13 @@ long sys_fork(void)
 		__dserver_per_thread_socket_refresh();
 		int newReadFd = __dserver_process_lifetime_pipe_refresh();
 
+#if defined(__arm64__) || defined(__aarch64__)
+		// Modern malloc keeps every xzone list fork-locked until its child
+		// callback. Defer work that can allocate until libSystem unlocks malloc.
+		postfork_child_wdfd = wdfd;
+		postfork_child_lifetime_read_fd = newReadFd;
+		postfork_child_pending = true;
+#else
 		// guard it
 		guard_entry_options_t options;
 		options.close = __dserver_close_socket;
@@ -65,6 +110,7 @@ long sys_fork(void)
 			sys_fchdir(wdfd);
 
 		__dserver_close_process_lifetime_pipe(newReadFd);
+#endif
 	}
 
 	return ret;
