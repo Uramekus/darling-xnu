@@ -428,6 +428,23 @@ void sigexc_handler(int linux_signum, struct linux_siginfo* info, struct linux_u
 #endif
 
 	state_to_kernel(ctxt, &tstate, &fstate);
+
+	if (linux_signum == LINUX_SIGTRAP && (info->si_code == 1 || info->si_code == 128)) {
+		/*
+		 * CRITICAL: When a TRAP_BRKPT (int3) occurs, Linux leaves the instruction
+		 * pointer (RIP/EIP) pointing to the byte AFTER the int3 instruction.
+		 * However, the macOS/XNU kernel (and Mach exception handlers) expect
+		 * the instruction pointer to point EXACTLY at the int3 instruction.
+		 * We must manually decrement the PC here before translating to EXC_BREAKPOINT.
+		 * This ensures macOS debuggers (like lldb) and crash reporters map the PC correctly.
+		 */
+#if defined(__x86_64__)
+		tstate.__rip -= 1;
+#elif defined(__i386__)
+		tstate.__eip -= 1;
+#endif
+	}
+
 	int ret = dserver_rpc_sigprocess(bsd_signum, linux_signum, info->si_pid, info->si_code, info->si_addr, &tstate, &fstate, &bsd_signum);
 	if (ret < 0 && is_server_gone(ret)) {
 		exit_server_gone();

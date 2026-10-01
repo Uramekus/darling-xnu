@@ -1,3 +1,4 @@
+#include <darling/emulation/common/string.h>
 #include <darling/emulation/xnu_syscall/bsd/impl/misc/proc_info.h>
 
 #define PRIVATE 1
@@ -7,6 +8,7 @@
 #include <mach/vm_prot.h>
 #include <stdbool.h>
 #include <sys/proc.h>
+#include <sys/resource.h>
 #include <stddef.h>
 
 #include <darling/emulation/common/base.h>
@@ -22,6 +24,8 @@
 #include <darling/emulation/xnu_syscall/bsd/impl/unistd/readlink.h>
 #include <darling/emulation/xnu_syscall/bsd/impl/unistd/getuid.h>
 #include <darling/emulation/xnu_syscall/bsd/impl/unistd/getgid.h>
+#include <darling/emulation/xnu_syscall/bsd/impl/unistd/getpid.h>
+#include <darling/emulation/xnu_syscall/bsd/impl/stat/stat.h>
 #include <darling/emulation/common/simple.h>
 #include <darling/emulation/xnu_syscall/bsd/helper/misc/readline.h>
 #include <darling/emulation/linux_premigration/elfcalls_wrapper.h>
@@ -35,6 +39,8 @@
 #define LINUX_PR_SET_NAME 15
 
 static long _proc_pidinfo(int32_t pid, uint32_t flavor, uint64_t arg, void* buffer, int32_t bufsize);
+static long _proc_pidinfo_pidrusage(int32_t pid, uint32_t flavor, void* buffer, int32_t bufsize);
+static long _proc_pidinfo_vnodepathinfo(int32_t pid, void* buffer, int32_t bufsize);
 
 extern __SIZE_TYPE__ strlen(const char *s);
 extern void *memset(void *s, int c, __SIZE_TYPE__ n);
@@ -42,7 +48,6 @@ extern void *memcpy(void *dest, const void *src, __SIZE_TYPE__ n);
 extern char *strcpy(char *dest, const char *src);
 extern char *strncpy(char *dest, const char *src, __SIZE_TYPE__ n);
 extern int strncmp (const char * str1, const char * str2, __SIZE_TYPE__ num);
-extern char *strchr(char *str, int character);
 
 long sys_proc_info(uint32_t callnum, int32_t pid, uint32_t flavor,
 		uint64_t arg, void* buffer, int32_t bufsize)
@@ -80,6 +85,8 @@ long sys_proc_info(uint32_t callnum, int32_t pid, uint32_t flavor,
 		}
 		case 8: // dirtycontrol
 			return 0;
+		case PROC_INFO_CALL_PIDRUSAGE: // 9: proc_pidrusage
+			return _proc_pidinfo_pidrusage(pid, flavor, buffer, bufsize);
 		case 2: // proc_pidinfo
 			return _proc_pidinfo(pid, flavor, arg, buffer, bufsize);
 		case 3: // proc_pidfdinfo
@@ -161,6 +168,10 @@ long _proc_pidinfo(int32_t pid, uint32_t flavor, uint64_t arg, void* buffer, int
 		{
 			return _proc_pidinfo_listthreads(pid, buffer, bufsize);
 		}
+		case PROC_PIDVNODEPATHINFO:
+		{
+			return _proc_pidinfo_vnodepathinfo(pid, buffer, bufsize);
+		}
 		default:
 		{
 			__simple_printf("sys_proc_info(): Unsupported pidinfo flavor: %d\n",
@@ -222,11 +233,6 @@ static long _proc_pidonfo_uniqinfo(int32_t pid, void* buffer, int32_t bufsize)
 	// Read info for ppid   //
 	//////////////////////////
 
-	if (ppid == 0) {
-		// A parent outside this PID namespace is reported as zero.
-		info->p_puniqueid = 0;
-		return sizeof(*info);
-	}
 	__simple_sprintf(path, "/proc/%d/stat", ppid);
 	if (!read_string(path, stat, sizeof(stat)))
 		return -ESRCH;
@@ -242,12 +248,8 @@ static long _proc_pidonfo_uniqinfo(int32_t pid, void* buffer, int32_t bufsize)
 	info->p_puniqueid = starttime << 16;
 	info->p_puniqueid |= (ppid & 0xffff);
 
-	// proc_pidinfo reports bytes copied, not a boolean success value.
-	return sizeof(*info);
-#else
-	// This variant does not populate the output structure.
-	return -ENOTSUP;
 #endif
+	return 1;
 }
 
 // glibc bits/confname.h
@@ -837,12 +839,172 @@ bail:
 	return count * sizeof(uint64_t);
 }
 
-long sys_proc_info_extended_id(uint32_t callnum, int32_t pid, uint32_t flavor,
-		uint32_t flags, uint64_t ext_id, uint64_t arg, void* buffer, int32_t bufsize)
+static long _proc_pidinfo_pidrusage(int32_t pid, uint32_t flavor, void* buffer, int32_t bufsize)
 {
-	// NOTE: flags and ext_id (Mach identity token filtering) not yet implemented.
-	// Falling back to standard proc_info is safe for most use cases.
-	(void)flags;
-	(void)ext_id;
-	return sys_proc_info(callnum, pid, flavor, arg, buffer, bufsize);
+	if (!buffer)
+		return -EFAULT;
+
+	size_t size;
+	switch (flavor)
+	{
+		case RUSAGE_INFO_V0:
+			size = sizeof(struct rusage_info_v0);
+			break;
+		case RUSAGE_INFO_V1:
+			size = sizeof(struct rusage_info_v1);
+			break;
+		case RUSAGE_INFO_V2:
+			size = sizeof(struct rusage_info_v2);
+			break;
+		case RUSAGE_INFO_V3:
+			size = sizeof(struct rusage_info_v3);
+			break;
+		case RUSAGE_INFO_V4:
+			size = sizeof(struct rusage_info_v4);
+			break;
+		case RUSAGE_INFO_V5:
+			size = sizeof(struct rusage_info_v5);
+			break;
+		case RUSAGE_INFO_V6:
+			size = sizeof(struct rusage_info_v6);
+			break;
+		default:
+			return -EINVAL;
+	}
+
+	if (bufsize > 0 && (size_t)bufsize < size)
+		return -ENOSPC;
+
+	memset(buffer, 0, size);
+	struct rusage_info_v0* ri = (struct rusage_info_v0*) buffer;
+
+	char path[64], stat[1024];
+	char *statptr;
+	const char* elem;
+
+	if (pid <= 0)
+		pid = sys_getpid();
+
+	__simple_sprintf(path, "/proc/%d/stat", pid);
+	if (!read_string(path, stat, sizeof(stat)))
+		return -ESRCH;
+
+	statptr = stat;
+	skip_stat_elems(&statptr, 9); // skip until minflt
+	elem = next_stat_elem(&statptr);
+	if (!elem) return -EINVAL;
+
+	skip_stat_elems(&statptr, 1); // skip until majflt
+	elem = next_stat_elem(&statptr);
+	if (!elem) return -EINVAL;
+	uint64_t majflt = __simple_atoi(elem, NULL);
+
+	skip_stat_elems(&statptr, 1); // skip until utime
+	elem = next_stat_elem(&statptr);
+	if (!elem) return -EINVAL;
+	uint64_t utime = __simple_atoi(elem, NULL);
+
+	elem = next_stat_elem(&statptr); // stime
+	if (!elem) return -EINVAL;
+	uint64_t stime = __simple_atoi(elem, NULL);
+
+	skip_stat_elems(&statptr, 6); // skip until vsize (priority=1, nice=2, num_threads=3, itrealvalue=4, starttime=5, vsize=6)
+	elem = next_stat_elem(&statptr); // vsize
+	elem = next_stat_elem(&statptr); // rss
+	if (!elem) return -EINVAL;
+	uint64_t rss = __simple_atoi(elem, NULL);
+
+	long ticks_per_sec = native_sysconf(_SC_CLK_TCK);
+	if (ticks_per_sec <= 0)
+		ticks_per_sec = 100;
+
+	ri->ri_user_time = (utime * 1000000000ULL) / ticks_per_sec;
+	ri->ri_system_time = (stime * 1000000000ULL) / ticks_per_sec;
+	ri->ri_pageins = majflt;
+	ri->ri_resident_size = rss * 4096;
+	ri->ri_phys_footprint = rss * 4096;
+
+	return 0;
+}
+
+static long _proc_pidinfo_vnodepathinfo(int32_t pid, void* buffer, int32_t bufsize)
+{
+	if (!buffer)
+		return -EFAULT;
+	if (bufsize < sizeof(struct proc_vnodepathinfo))
+		return -ENOSPC;
+
+	struct proc_vnodepathinfo* info = (struct proc_vnodepathinfo*) buffer;
+	memset(info, 0, sizeof(*info));
+
+	if (pid <= 0)
+		pid = sys_getpid();
+
+	char linkpath[64];
+	char target[4096];
+	int ret;
+
+	// 1. CWD
+	__simple_sprintf(linkpath, "/proc/%d/cwd", pid);
+	ret = LINUX_SYSCALL(__NR_readlink, linkpath, target, sizeof(target) - 1);
+	if (ret > 0)
+	{
+		target[ret] = '\0';
+		struct vchroot_unexpand_args unex;
+		strncpy(unex.path, target, sizeof(unex.path) - 1);
+		unex.path[sizeof(unex.path) - 1] = '\0';
+		if (vchroot_unexpand(&unex) == 0)
+			strncpy(info->pvi_cdir.vip_path, unex.path, sizeof(info->pvi_cdir.vip_path) - 1);
+		else
+			strncpy(info->pvi_cdir.vip_path, target, sizeof(info->pvi_cdir.vip_path) - 1);
+	}
+	else
+	{
+		strcpy(info->pvi_cdir.vip_path, "/");
+	}
+
+	info->pvi_cdir.vip_vi.vi_type = 2; // VDIR
+	struct stat64 st_cwd;
+	if (sys_stat64(info->pvi_cdir.vip_path, &st_cwd) == 0)
+	{
+		info->pvi_cdir.vip_vi.vi_stat.vst_dev = st_cwd.st_dev;
+		info->pvi_cdir.vip_vi.vi_stat.vst_mode = st_cwd.st_mode;
+		info->pvi_cdir.vip_vi.vi_stat.vst_ino = st_cwd.st_ino;
+		info->pvi_cdir.vip_vi.vi_stat.vst_uid = st_cwd.st_uid;
+		info->pvi_cdir.vip_vi.vi_stat.vst_gid = st_cwd.st_gid;
+		info->pvi_cdir.vip_vi.vi_stat.vst_size = st_cwd.st_size;
+	}
+
+	// 2. ROOT
+	__simple_sprintf(linkpath, "/proc/%d/root", pid);
+	ret = LINUX_SYSCALL(__NR_readlink, linkpath, target, sizeof(target) - 1);
+	if (ret > 0)
+	{
+		target[ret] = '\0';
+		struct vchroot_unexpand_args unex;
+		strncpy(unex.path, target, sizeof(unex.path) - 1);
+		unex.path[sizeof(unex.path) - 1] = '\0';
+		if (vchroot_unexpand(&unex) == 0)
+			strncpy(info->pvi_rdir.vip_path, unex.path, sizeof(info->pvi_rdir.vip_path) - 1);
+		else
+			strncpy(info->pvi_rdir.vip_path, target, sizeof(info->pvi_rdir.vip_path) - 1);
+	}
+	else
+	{
+		strcpy(info->pvi_rdir.vip_path, "/");
+	}
+
+	info->pvi_rdir.vip_vi.vi_type = 2; // VDIR
+	struct stat64 st_root;
+	if (sys_stat64(info->pvi_rdir.vip_path, &st_root) == 0)
+	{
+		info->pvi_rdir.vip_vi.vi_stat.vst_dev = st_root.st_dev;
+		info->pvi_rdir.vip_vi.vi_stat.vst_mode = st_root.st_mode;
+		info->pvi_rdir.vip_vi.vi_stat.vst_ino = st_root.st_ino;
+		info->pvi_rdir.vip_vi.vi_stat.vst_uid = st_root.st_uid;
+		info->pvi_rdir.vip_vi.vi_stat.vst_gid = st_root.st_gid;
+		info->pvi_rdir.vip_vi.vi_stat.vst_size = st_root.st_size;
+	}
+
+	return sizeof(struct proc_vnodepathinfo);
 }

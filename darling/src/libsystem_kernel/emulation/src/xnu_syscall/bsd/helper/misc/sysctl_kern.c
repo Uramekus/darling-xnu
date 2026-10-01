@@ -23,6 +23,7 @@
 enum {
 	_KERN_MSGBUF = 1000,
 	_KERN_OSPRODUCTVERSION,
+	_KERN_NUM_FILES,
 
 	_KERN_SEMMNS = 1000,
 };
@@ -39,6 +40,9 @@ static sysctl_handler(handle_osrelease);
 static sysctl_handler(handle_version);
 static sysctl_handler(handle_osversion);
 static sysctl_handler(handle_maxproc);
+static sysctl_handler(handle_maxfiles);
+static sysctl_handler(handle_maxfilesperproc);
+static sysctl_handler(handle_num_files);
 static sysctl_handler(handle_netboot);
 static sysctl_handler(handle_safeboot);
 static sysctl_handler(handle_usrstack32);
@@ -63,6 +67,9 @@ const struct known_sysctl sysctls_kern[] = {
 	{ .oid = KERN_PROCARGS2, .type = CTLTYPE_STRUCT, .exttype = "", .name = "procargs2", .handler = handle_procargs32 },
 	{ .oid = KERN_ARGMAX, .type = CTLTYPE_INT, .exttype = "I", .name = "argmax", .handler = handle_argmax },
 	{ .oid = KERN_MAXPROC, .type = CTLTYPE_INT, .exttype = "I", .name = "maxproc", .handler = handle_maxproc },
+	{ .oid = KERN_MAXFILES, .type = CTLTYPE_INT, .exttype = "I", .name = "maxfiles", .handler = handle_maxfiles },
+	{ .oid = KERN_MAXFILESPERPROC, .type = CTLTYPE_INT, .exttype = "I", .name = "maxfilesperproc", .handler = handle_maxfilesperproc },
+	{ .oid = _KERN_NUM_FILES, .type = CTLTYPE_INT, .exttype = "I", .name = "num_files", .handler = handle_num_files },
 	{ .oid = KERN_NETBOOT, .type = CTLTYPE_INT, .exttype = "I", .name = "netboot", .handler = handle_netboot },
 	{ .oid = KERN_SAFEBOOT, .type = CTLTYPE_INT, .exttype = "I", .name = "safeboot", .handler = handle_safeboot },
 	{ .oid = KERN_BOOTTIME, .type = CTLTYPE_STRUCT, .exttype = "S,timeval", .name = "boottime", .handler = handle_boottime },
@@ -148,7 +155,7 @@ sysctl_handler(handle_boottime)
 	{
 		if (*oldlen < sizeof(*tv))
 			return -EINVAL;
-		sys_gettimeofday(tv, NULL);
+		sys_gettimeofday(tv, NULL, NULL);
 
 		tv->tv_sec -= info.uptime;
 
@@ -217,12 +224,9 @@ sysctl_handler(handle_hostname)
 	
 	if (_new && newlen > 0)
 	{
-		// DARLING-ANDROID: this Android aarch64 kernel does not expose
-		// __NR_sethostname (asm-generic 161); a raw svc #0 with that number
-		// raises SIGSYS and kills the guest. Setting the hostname requires
-		// root (pid1) anyway, so fail gracefully with EPERM instead of the
-		// raw call.
-		rv = -EPERM;
+		rv = LINUX_SYSCALL(__NR_sethostname, _new, newlen);
+		if (rv < 0)
+			rv = errno_linux_to_bsd(rv);
 	}
 	
 	return rv;
@@ -237,10 +241,9 @@ sysctl_handler(handle_domainname)
 	
 	if (_new && newlen > 0)
 	{
-		// DARLING-ANDROID: __NR_setdomainname (asm-generic 162) is not present
-		// on this kernel -> raw svc #0 would raise SIGSYS. Requires root
-		// anyway; fail gracefully with EPERM.
-		rv = -EPERM;
+		rv = LINUX_SYSCALL(__NR_setdomainname, _new, newlen);
+		if (rv < 0)
+			rv = errno_linux_to_bsd(rv);
 	}
 	
 	return rv;
@@ -344,5 +347,23 @@ static sysctl_handler(handle_osrevision) {
 	if (ovalue)
 		*ovalue = EMULATED_OSREVISION;
 	*oldlen = sizeof(*ovalue);
+	return 0;
+}
+
+static sysctl_handler(handle_maxfiles) {
+	sysctl_handle_size(sizeof(int));
+	*((int*) old) = 49152;
+	return 0;
+}
+
+static sysctl_handler(handle_maxfilesperproc) {
+	sysctl_handle_size(sizeof(int));
+	*((int*) old) = 10240;
+	return 0;
+}
+
+static sysctl_handler(handle_num_files) {
+	sysctl_handle_size(sizeof(int));
+	*((int*) old) = 1024;
 	return 0;
 }
