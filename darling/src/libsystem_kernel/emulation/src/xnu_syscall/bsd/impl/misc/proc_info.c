@@ -1010,3 +1010,10 @@ static long _proc_pidinfo_vnodepathinfo(int32_t pid, void* buffer, int32_t bufsi
 
 	return sizeof(struct proc_vnodepathinfo);
 }
+
+long sys_proc_info_extended_id(uint32_t callnum, int32_t pid, uint32_t flavor,
+		uint32_t flags, uint64_t ext_id, uint64_t arg, void* buffer, int32_t bufsize)
+{
+	return sys_proc_info(callnum, pid, flavor, arg, buffer, bufsize);
+}
+
